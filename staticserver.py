@@ -14,20 +14,12 @@ from mutagen.mp4 import MP4
 from mutagen.mp3 import MP3
 
 
-#audiobooks_path = "audiobooks"
-#audiobooks_path = "/media/BAY/audiobooks"
-#audiobooks_path = "/media/ELEMENTS/BAY/audiobooks/podcast"
-audiobooks_path = "/media/hdo/BIGNTFS/BAY/audiobooks"
-
-
-
+audiobooks_path = "/audiobooks"
+#audiobooks_path = "/home/hdo/audiobooks"
 
 # prepare files
 
 medialist = []
-ip_address = "10.14.50.105"
-#ip_address = "192.168.2.107"
-
         
 # create feed.xml
 
@@ -36,22 +28,13 @@ ip_address = "10.14.50.105"
 #    sys.exit(1)
 
 
-def get_ip():
-    proc = subprocess.Popen(['ifconfig'], stdout=subprocess.PIPE, )
-    stdout_data = proc.communicate()[0]
-    ip_adr = re.findall('inet addr:(.*?)  Bcast:', stdout_data)
-    if len(ip_adr) > 0:
-    # assume it's the first ip adress
-        return ip_adr[0]
-    return ""
-
 def url_encode(url):
     return urllib2.quote(url)
 
 def url_decode(url):
     return urllib2.unquote(url)
 
-def generate_feed_xml(udir, rpath):
+def generate_feed_xml(host_info, udir, rpath):
 
     cover_file = os.path.join(udir, 'folder.jpg')
     info_file = os.path.join(udir, 'info.txt')
@@ -115,13 +98,11 @@ def generate_feed_xml(udir, rpath):
         feed_buffer.append('    <pubDate>%s</pubDate> \n' % pubdate)
         feed_buffer.append('    <lastBuildDate>%s</lastBuildDate> \n' % pubdate)
 
-        ip_adr = get_ip()
-
         dname = os.path.dirname(rpath)
         #if dname.startswith('/'):
         #    dname = dname[1:]
         if has_cover:        
-            href_cover = "http://%s:9090/repo/%s/folder.jpg" % (ip_adr, url_encode(dname))
+            href_cover = "http://%s/repo/%s/folder.jpg" % (host_info, url_encode(dname))
             feed_buffer.append('    <itunes:image href="%s"/> \n' % href_cover)
 
         counter = 0
@@ -147,7 +128,7 @@ def generate_feed_xml(udir, rpath):
             elif item.endswith('.mp3'):
                 mtype = "audio/mp3"
             
-            href_audio = "http://%s:9090/repo/%s/%s" % (ip_adr, url_encode(dname), url_encode(item))
+            href_audio = "http://%s/repo/%s/%s" % (host_info, url_encode(dname), url_encode(item))
             # dirty hack
             href_audio = href_audio.replace("repo//","repo/")
             print "href_audio: %s" % href_audio
@@ -177,6 +158,8 @@ class Home(resource.Resource):
         print "host: %s" % request.getHost()
         print "request.path: %s" % request.path
 
+        host_info = request.getHeader('host')
+
         decoded_url = urllib2.unquote(request.path)
 
         rpath = decoded_url[1:]        
@@ -194,20 +177,39 @@ class Home(resource.Resource):
             print "udir: %s" % udir
             if os.path.exists(udir):
                 request.setHeader("Content-Type", "application/xml")
-                data = generate_feed_xml(udir, rpath)
+                data = generate_feed_xml(host_info, udir, rpath)
             else:
                 data = "Error 401"
         elif os.path.exists(upath):
         
+            # check whether folder has playable files
+
+            file_list = sorted(os.listdir(upath))
             has_audiobook = False
-            data = "<ul>"
-            for item in sorted(os.listdir(upath)):
+
+            for item in file_list:
                 if item.endswith('.mp3'):
                     has_audiobook = True
                 if item.endswith('.m4b'):
                     has_audiobook = True
                 if item.endswith('.m4a'):
                     has_audiobook = True
+
+            data = "<ul>"
+
+            if has_audiobook:
+                item = "feed.xml"
+                link = os.path.join(rpath, item)
+                encoded_link = urllib2.quote(link)                
+                print encoded_link
+                data = data + '<li><a href="/%s">%s</a></li>' % (encoded_link, item)                
+
+            for item in file_list:
+
+                # hide hidden files
+                if item.startswith('.'):
+                    continue
+
                 title = item
                 link = os.path.join(rpath, item)
                 encoded_link = urllib2.quote(link)                
@@ -217,12 +219,7 @@ class Home(resource.Resource):
                     data = data + '<li><a href="/%s">%s</a></li>' % (encoded_link, item)
                 else:
                     data = data + '<li>%s</li>' % (item)                
-            if has_audiobook:
-                item = "feed.xml"
-                link = os.path.join(rpath, item)
-                encoded_link = urllib2.quote(link)                
-                print encoded_link
-                data = data + '<li><a href="/%s">%s</a></li>' % (encoded_link, item)                
+
             data = data + "</ul>"
         else:
             data = "error: %s" % upath
@@ -231,9 +228,11 @@ class Home(resource.Resource):
 
 
 root = Home()
-root.putChild('repo', File(audiobooks_path, defaultType='application/octet-stream'))
+
+if os.path.exists(audiobooks_path):
+	root.putChild('repo', File(audiobooks_path, defaultType='application/octet-stream'))
 site = server.Site(root)
-ip_adr = get_ip()
+ip_adr = "localhost"
 port = 9090
 reactor.listenTCP(port, site)
 print "running server at: %s:%d" % (ip_adr, port)
